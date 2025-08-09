@@ -1,82 +1,107 @@
-<?php 
-// Includes the header file, which handles authentication and page layout.
-include 'header.php'; 
-?>
-<?php // Main heading for the page. ?>
-<h1 class="mb-4">Add New Student</h1>
-    <?php
-    // --- FORM SUBMISSION LOGIC ---
-    // Includes the database connection file.
-    include 'db.php';
-    // Checks if the 'add' button on the form was clicked.
-    if(isset($_POST['add'])){
-        // Retrieves the student's name and email from the submitted form data.
-        $name = $_POST['name'];
-        $email = $_POST['email'];
-        // Retrieves the selected course and batch IDs.
-        $course_id = $_POST['course_id'];
-        $batch_id = $_POST['batch_id'];
-        // SQL query to insert the new student's details into the 'students' table.
-        $query = "INSERT INTO students (name, email, course_id, batch_id) VALUES ('$name', '$email', '$course_id', '$batch_id')";
-        // Executes the query.
-        if($conn->query($query) === TRUE){
-            // If the query is successful, redirect the user back to the main student management page.
-            header("Location: students.php");
-        } else {
-            // If there's an error, display it.
-            echo "<div class='alert alert-danger'>Error adding student: " . $conn->error . "</div>";
+<?php
+// --- SETUP AND SECURITY ---
+include 'header.php';
+// Ensure only admins can access this page.
+if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+    header("Location: login.php");
+    exit();
+}
+
+// --- HANDLE FORM SUBMISSION ---
+// Check if the form was submitted to add a new student.
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_student'])) {
+    // Get and sanitize data from the form.
+    $name = trim($_POST['name']);
+    $email = trim($_POST['email']);
+    $batch_id = $_POST['batch_id'];
+    $password = 'student123'; // Set a default password for new students.
+    // Hash the password for secure storage in the database.
+    $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+    // Validate that all required fields are filled.
+    if (!empty($name) && !empty($email) && !empty($batch_id)) {
+        // Use a transaction to ensure that both the student and their user account are created successfully.
+        $conn->begin_transaction();
+        try {
+            // Step 1: Insert the new student's details into the 'students' table.
+            $stmt = $conn->prepare("INSERT INTO students (name, email, batch_id) VALUES (?, ?, ?)");
+            $stmt->bind_param("ssi", $name, $email, $batch_id);
+            $stmt->execute();
+            $student_id = $stmt->insert_id; // Get the ID of the newly created student.
+            $stmt->close();
+
+            // Step 2: Create a corresponding user account for the student in the 'users' table.
+            $role = 'student';
+            $stmt = $conn->prepare("INSERT INTO users (username, password, role, student_id) VALUES (?, ?, ?, ?)");
+            // The student's email is used as their username.
+            $stmt->bind_param("sssi", $email, $hashed_password, $role, $student_id);
+            $stmt->execute();
+            $stmt->close();
+
+            // If both steps succeed, commit the transaction to save the changes.
+            $conn->commit();
+            $success_message = "Student added successfully! Their username is their email and default password is 'student123'.";
+        } catch (Exception $e) {
+            // If any step fails, roll back the transaction to undo all changes.
+            $conn->rollback();
+            // Check for a duplicate entry error (MySQL error number 1062).
+            if ($conn->errno == 1062) {
+                $error_message = "Error: A student with this email already exists.";
+            } else {
+                $error_message = "An error occurred. Please try again. " . $e->getMessage();
+            }
         }
+    } else {
+        // If validation fails, set an error message.
+        $error_message = "Please fill in all fields.";
     }
-    ?>
-    <?php // --- HTML FORM --- ?>
-    <?php // This form is used to collect the new student's information. ?>
-    <form action="add_student.php" method="post">
-        <?php // Input field for the student's name. ?>
-        <div class="form-group">
-            <label for="name">Name:</label>
-            <input type="text" name="name" class="form-control" required>
-        </div>
-        <?php // Input field for the student's email. ?>
-        <div class="form-group">
-            <label for="email">Email:</label>
-            <input type="email" name="email" class="form-control" required>
-        </div>
-        <?php // Dropdown to select the student's course. ?>
-        <div class="form-group">
-            <label for="course">Course:</label>
-            <select name="course_id" class="form-control" required>
-                <option value="">Select Course</option>
-                <?php
-                // Fetches all courses from the database to populate the dropdown.
-                $course_query = "SELECT * FROM courses";
-                $course_result = $conn->query($course_query);
-                while($course_row = $course_result->fetch_assoc()){
-                    echo "<option value='{$course_row['course_id']}'>{$course_row['course_name']}</option>";
-                }
-                ?>
-            </select>
-        </div>
-        <?php // Dropdown to select the student's batch. ?>
-        <div class="form-group">
-            <label for="batch">Batch:</label>
-            <select name="batch_id" class="form-control" required>
-                <option value="">Select Batch</option>
-                <?php
-                // Fetches all batches from the database to populate the dropdown.
-                $batch_query = "SELECT * FROM batches";
-                $batch_result = $conn->query($batch_query);
-                while($batch_row = $batch_result->fetch_assoc()){
-                    echo "<option value='{$batch_row['batch_id']}'>{$batch_row['batch_name']}</option>";
-                }
-                ?>
-            </select>
-        </div>
-        <?php // Submit button to add the student. ?>
-        <button type="submit" name="add" class="btn btn-primary">Add Student</button>
-        <?php // Cancel button to return to the student management page. ?>
-        <a href="students.php" class="btn btn-secondary">Cancel</a>
-    </form>
-<?php 
-// Includes the footer file.
-include 'footer.php'; 
+}
+
+// --- DATA FETCHING FOR THE FORM ---
+// Fetch all batches to populate the "Assign to Batch" dropdown.
+$batches_result = $conn->query("SELECT * FROM batches ORDER BY batch_name");
 ?>
+
+<!-- --- HTML CONTENT --- -->
+<div class="container mt-4">
+    <h1 class="mb-4">Add New Student</h1>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Student Details</h3>
+        </div>
+        <div class="card-body">
+            <!-- Display success or error messages if they exist. -->
+            <?php if(isset($success_message)) { echo "<div class='alert alert-success'>$success_message</div>"; } ?>
+            <?php if(isset($error_message)) { echo "<div class='alert alert-danger'>$error_message</div>"; } ?>
+            
+            <!-- The form submits data back to this same page using the POST method. -->
+            <form action="add_student.php" method="post">
+                <div class="mb-3">
+                    <label for="name" class="form-label">Full Name</label>
+                    <input type="text" class="form-control" id="name" name="name" required>
+                </div>
+                <div class="mb-3">
+                    <label for="email" class="form-label">Email Address (will be used as username)</label>
+                    <input type="email" class="form-control" id="email" name="email" required>
+                </div>
+                <div class="mb-3">
+                    <label for="batch_id" class="form-label">Assign to Batch</label>
+                    <select class="form-select" id="batch_id" name="batch_id" required>
+                        <option value="">Select a Batch</option>
+                        <?php while($batch = $batches_result->fetch_assoc()): ?>
+                            <option value="<?php echo $batch['batch_id']; ?>"><?php echo htmlspecialchars($batch['batch_name']); ?></option>
+                        <?php endwhile; ?>
+                    </select>
+                </div>
+                <!-- Informational message about the default password. -->
+                <div class="alert alert-info">
+                    The default password for the new student will be <strong>student123</strong>. They can be advised to change it later.
+                </div>
+                <button type="submit" name="add_student" class="btn btn-primary">Add Student</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<?php include 'footer.php'; ?>
