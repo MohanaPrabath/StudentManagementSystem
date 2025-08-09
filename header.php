@@ -55,7 +55,7 @@ include_once 'db.php';
         <!-- The link destination ('href') changes depending on the user's role (admin or student). -->
         <a class="navbar-brand" href="<?php echo isset($_SESSION['role']) && $_SESSION['role'] == 'admin' ? 'dashboard.php' : 'student_dashboard.php'; ?>">
             <i class="bi bi-journal-check"></i> <!-- An icon from Bootstrap Icons -->
-            Attendance System
+            University Student Attendance System
         </a>
 
         <!-- Mobile Menu Button: This button appears on small screens to toggle the navigation links. -->

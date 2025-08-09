@@ -13,7 +13,7 @@ $courses_count = $conn->query("SELECT COUNT(*) as count FROM courses")->fetch_as
 ?>
 
 <div class="container mt-4">
-    <h1 class="mb-4">Admin Dashboard</h1>
+    <h1 class="mb-4">Faculty Dashboard</h1>
     
     <!-- Stats Cards -->
     <div class="row mb-4">
