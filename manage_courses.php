@@ -1,69 +1,93 @@
 <?php
-// --- SETUP AND SECURITY ---
-include 'header.php';
-// Ensure only admins can access this page.
+// --- PRE-PROCESSING LOGIC ---
+// This entire PHP block is placed before any HTML output.
+// It handles session management, security checks, and data manipulation (add/delete).
+// This resolves the "headers already sent" error by ensuring that any `header()` redirects
+// are called before the HTML document starts (which happens in `header.php`).
+
+// Start the session if it hasn't been started already.
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+// Include the database connection. Using 'include_once' is safe even if 'header.php' also includes it.
+include_once 'db.php';
+
+// --- SECURITY CHECK ---
+// Ensure only admins can access this page. This check is done early.
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+    // If the user is not an admin, redirect to the login page and stop script execution.
     header("Location: login.php");
     exit();
 }
 
+// --- HANDLE COURSE DELETION ---
+// Check if a 'delete_id' is present in the URL (from the "Delete" button).
+if (isset($_GET['delete_id'])) {
+    $delete_id = (int)$_GET['delete_id'];
+    // Prepare a DELETE statement to prevent SQL injection.
+    // The database is set up with 'ON DELETE CASCADE', so related records in other tables
+    // (like 'batch_courses' and 'attendance') will be deleted automatically.
+    $stmt = $conn->prepare("DELETE FROM courses WHERE course_id = ?");
+    $stmt->bind_param("i", $delete_id);
+    
+    // Execute the statement and set a session message to provide feedback to the user.
+    if ($stmt->execute()) {
+        $_SESSION['message'] = "Course deleted successfully.";
+        $_SESSION['message_type'] = "success";
+    } else {
+        $_SESSION['message'] = "Error deleting course. It might be in use or a database error occurred.";
+        $_SESSION['message_type'] = "danger";
+    }
+    $stmt->close();
+    
+    // --- REDIRECT AFTER DELETION ---
+    // Redirect back to the same page to show the updated list and the success/error message.
+    // This also prevents the action from being repeated if the user refreshes the page.
+    header("Location: manage_courses.php");
+    exit();
+}
+
 // --- HANDLE ADDING A NEW COURSE ---
-// Check if the form was submitted to add a new course.
+// Check if the form was submitted via POST and the 'add_course' button was clicked.
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_course'])) {
     // Get and sanitize the course name from the form.
     $course_name = trim($_POST['course_name']);
+    
     // Validate that the course name is not empty.
     if (!empty($course_name)) {
         // Prepare an INSERT statement to prevent SQL injection.
         $stmt = $conn->prepare("INSERT INTO courses (course_name) VALUES (?)");
         $stmt->bind_param("s", $course_name);
-        // Execute the statement and set a success or error message in the session.
+        
+        // Execute the statement and set a feedback message.
         if ($stmt->execute()) {
             $_SESSION['message'] = "Course added successfully!";
             $_SESSION['message_type'] = "success";
         } else {
-            // The 'course_name' is a UNIQUE column, so this error usually means it already exists.
+            // The 'course_name' column in the database is UNIQUE.
+            // An error here usually means the course name already exists.
             $_SESSION['message'] = "Error adding course. It may already exist.";
             $_SESSION['message_type'] = "danger";
         }
         $stmt->close();
-        // Redirect back to the same page to prevent form resubmission on refresh.
-        header("Location: manage_courses.php");
-        exit();
     } else {
         // If the course name was empty, set an error message.
         $_SESSION['message'] = "Course name cannot be empty.";
         $_SESSION['message_type'] = "danger";
-        header("Location: manage_courses.php");
-        exit();
     }
-}
-
-// --- HANDLE COURSE DELETION ---
-// Check if a 'delete_id' is present in the URL.
-if (isset($_GET['delete_id'])) {
-    $delete_id = (int)$_GET['delete_id'];
-    // Prepare a DELETE statement.
-    // Note: The database's 'ON DELETE CASCADE' will automatically handle deleting
-    // related records in 'batch_courses' and 'attendance'.
-    $stmt = $conn->prepare("DELETE FROM courses WHERE course_id = ?");
-    $stmt->bind_param("i", $delete_id);
-    // Execute the statement and set a success or error message.
-    if ($stmt->execute()) {
-        $_SESSION['message'] = "Course deleted successfully.";
-        $_SESSION['message_type'] = "success";
-    } else {
-        $_SESSION['message'] = "Error deleting course. It might be in use.";
-        $_SESSION['message_type'] = "danger";
-    }
-    $stmt->close();
-    // Redirect back to the main page.
+    
+    // --- REDIRECT AFTER ADDING ---
+    // Redirect back to the same page to prevent form resubmission on refresh.
     header("Location: manage_courses.php");
     exit();
 }
 
+// --- PAGE SETUP ---
+// Now that all processing and potential redirects are done, we can safely include the header.
+include 'header.php';
+
 // --- DATA FETCHING FOR DISPLAY ---
-// Fetch all courses from the database to display in the table.
+// Fetch all courses from the database to display in the table below.
 $courses_result = $conn->query("SELECT * FROM courses ORDER BY course_name");
 ?>
 
@@ -73,9 +97,9 @@ $courses_result = $conn->query("SELECT * FROM courses ORDER BY course_name");
 
     <?php
     // --- DISPLAY SESSION MESSAGES ---
-    // Check if a message was set in the session (e.g., after adding or deleting a course).
+    // Check if a feedback message was set in the session (e.g., after adding or deleting).
     if (isset($_SESSION['message'])) {
-        // Display the message in a Bootstrap alert box.
+        // Display the message in a Bootstrap alert box. The type (success/danger) is also from the session.
         echo "<div class='alert alert-{$_SESSION['message_type']}'>{$_SESSION['message']}</div>";
         // Unset the session variables so the message doesn't show again on the next page load.
         unset($_SESSION['message']);
